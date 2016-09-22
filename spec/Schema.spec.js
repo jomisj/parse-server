@@ -211,7 +211,7 @@ describe('SchemaController', () => {
       });
   });
 
-  it_exclude_dbs(['postgres'])('will resolve class creation races appropriately', done => {
+  it('will resolve class creation races appropriately', done => {
     // If two callers race to create the same schema, the response to the
     // race loser should be the same as if they hadn't been racing.
     config.database.loadSchema()
@@ -617,7 +617,7 @@ describe('SchemaController', () => {
     });
   });
 
-  it_exclude_dbs(['postgres'])('refuses to delete fields that dont exist', done => {
+  it('refuses to delete fields that dont exist', done => {
     hasAllPODobject().save()
     .then(() => config.database.loadSchema())
     .then(schema => schema.deleteField('missingField', 'HasAllPOD'))
@@ -628,7 +628,7 @@ describe('SchemaController', () => {
     });
   });
 
-  it_exclude_dbs(['postgres'])('drops related collection when deleting relation field', done => {
+  it('drops related collection when deleting relation field', done => {
     var obj1 = hasAllPODobject();
     obj1.save()
       .then(savedObj1 => {
@@ -659,7 +659,7 @@ describe('SchemaController', () => {
       });
   });
 
-  it_exclude_dbs(['postgres'])('can delete relation field when related _Join collection not exist', done => {
+  it('can delete relation field when related _Join collection not exist', done => {
     config.database.loadSchema()
     .then(schema => {
       schema.addClassIfNotExists('NewClass', {
@@ -688,7 +688,13 @@ describe('SchemaController', () => {
       })
       .then(() => config.database.collectionExists('_Join:relationField:NewClass'))
       .then(exist => {
-        expect(exist).toEqual(false);
+        on_db('postgres', () => {
+          // We create the table when creating the column
+          expect(exist).toEqual(true);
+        }, () => {
+          expect(exist).toEqual(false);
+        });
+        
       })
       .then(() => schema.deleteField('relationField', 'NewClass', config.database))
       .then(() => schema.reloadData())
@@ -705,7 +711,7 @@ describe('SchemaController', () => {
     });
   });
 
-  it_exclude_dbs(['postgres'])('can delete string fields and resave as number field', done => {
+  it('can delete string fields and resave as number field', done => {
     Parse.Object.disableSingleInstance();
     var obj1 = hasAllPODobject();
     var obj2 = hasAllPODobject();
@@ -733,7 +739,7 @@ describe('SchemaController', () => {
     });
   });
 
-  it_exclude_dbs(['postgres'])('can delete pointer fields and resave as string', done => {
+  it('can delete pointer fields and resave as string', done => {
     Parse.Object.disableSingleInstance();
     var obj1 = new Parse.Object('NewClass');
     obj1.save()
@@ -801,5 +807,63 @@ describe('SchemaController', () => {
       customField: { type: 'String' }
     });
     done();
+  });
+
+  it('yields a proper schema mismatch error (#2661)', done => {
+    let anObject = new Parse.Object('AnObject');
+    let anotherObject = new Parse.Object('AnotherObject');
+    let someObject = new Parse.Object('SomeObject');
+    Parse.Object.saveAll([anObject, anotherObject, someObject]).then(() => {
+      anObject.set('pointer', anotherObject);
+      return anObject.save();
+    }).then(() => {
+      anObject.set('pointer', someObject);
+      return anObject.save();
+    }).then(() => {
+      fail('shoud not save correctly');
+      done();
+    }, (err) => {
+      expect(err instanceof Parse.Error).toBeTruthy();
+      expect(err.message).toEqual('schema mismatch for AnObject.pointer; expected Pointer<AnotherObject> but got Pointer<SomeObject>')
+      done();
+    });
+  });
+
+  it('yields a proper schema mismatch error bis (#2661)', done => {
+    let anObject = new Parse.Object('AnObject');
+    let someObject = new Parse.Object('SomeObject');
+    Parse.Object.saveAll([anObject, someObject]).then(() => {
+      anObject.set('number', 1);
+      return anObject.save();
+    }).then(() => {
+      anObject.set('number', someObject);
+      return anObject.save();
+    }).then(() => {
+      fail('shoud not save correctly');
+      done();
+    }, (err) => {
+      expect(err instanceof Parse.Error).toBeTruthy();
+      expect(err.message).toEqual('schema mismatch for AnObject.number; expected Number but got Pointer<SomeObject>')
+      done();
+    });
+  });
+
+  it('yields a proper schema mismatch error ter (#2661)', done => {
+    let anObject = new Parse.Object('AnObject');
+    let someObject = new Parse.Object('SomeObject');
+    Parse.Object.saveAll([anObject, someObject]).then(() => {
+      anObject.set('pointer', someObject);
+      return anObject.save();
+    }).then(() => {
+      anObject.set('pointer', 1);
+      return anObject.save();
+    }).then(() => {
+      fail('shoud not save correctly');
+      done();
+    }, (err) => {
+      expect(err instanceof Parse.Error).toBeTruthy();
+      expect(err.message).toEqual('schema mismatch for AnObject.pointer; expected Pointer<SomeObject> but got Number')
+      done();
+    });
   });
 });

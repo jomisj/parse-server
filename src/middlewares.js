@@ -31,9 +31,12 @@ export function handleParseHeaders(req, res, next) {
   var basicAuth = httpAuth(req);
 
   if (basicAuth) {
-    info.appId = basicAuth.appId
-    info.masterKey = basicAuth.masterKey || info.masterKey;
-    info.javascriptKey = basicAuth.javascriptKey || info.javascriptKey;
+    var basicAuthAppId = basicAuth.appId;
+    if (AppCache.get(basicAuthAppId)) {
+      info.appId = basicAuthAppId;
+      info.masterKey = basicAuth.masterKey || info.masterKey;
+      info.javascriptKey = basicAuth.javascriptKey || info.javascriptKey;
+    }
   }
 
   if (req.body) {
@@ -144,8 +147,16 @@ export function handleParseHeaders(req, res, next) {
     return;
   }
 
-  return auth.getAuthForSessionToken({ config: req.config, installationId: info.installationId, sessionToken: info.sessionToken })
-    .then((auth) => {
+  return Promise.resolve().then(() => {
+    // handle the upgradeToRevocableSession path on it's own
+    if (info.sessionToken && 
+        req.url === '/upgradeToRevocableSession' && 
+        info.sessionToken.indexOf('r:') != 0) {
+        return auth.getAuthForLegacySessionToken({ config: req.config, installationId: info.installationId, sessionToken: info.sessionToken })
+    } else {
+        return auth.getAuthForSessionToken({ config: req.config, installationId: info.installationId, sessionToken: info.sessionToken })
+    }
+  }).then((auth) => {
       if (auth) {
         req.auth = auth;
         next();

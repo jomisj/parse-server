@@ -31,6 +31,7 @@ const defaultColumns = Object.freeze({
     "password":      {type:'String'},
     "email":         {type:'String'},
     "emailVerified": {type:'Boolean'},
+    "authData":      {type:'Object'}
   },
   // The additional default columns for the _Installation collection (in addition to DefaultCols)
   _Installation: {
@@ -86,6 +87,24 @@ const defaultColumns = Object.freeze({
     "errorMessage": {type:'Object'},
     "sentPerType":  {type:'Object'},
     "failedPerType":{type:'Object'},
+  },
+  _JobStatus: {
+    "jobName":    {type: 'String'},
+    "source":     {type: 'String'},
+    "status":     {type: 'String'},
+    "message":    {type: 'String'},
+    "params":     {type: 'Object'}, // params received when calling the job
+    "finishedAt": {type: 'Date'}
+  },
+  _Hooks: {
+    "functionName": {type:'String'},
+    "className":    {type:'String'},
+    "triggerName":  {type:'String'},
+    "url":          {type:'String'}
+  },
+  _GlobalConfig: {
+    "objectId": {type: 'String'},
+    "params": {type: 'Object'}
   }
 });
 
@@ -94,9 +113,9 @@ const requiredColumns = Object.freeze({
   _Role: ["name", "ACL"]
 });
 
-const systemClasses = Object.freeze(['_User', '_Installation', '_Role', '_Session', '_Product', '_PushStatus']);
+const systemClasses = Object.freeze(['_User', '_Installation', '_Role', '_Session', '_Product', '_PushStatus', '_JobStatus']);
 
-const volatileClasses = Object.freeze(['_PushStatus', '_Hooks', '_GlobalConfig']);
+const volatileClasses = Object.freeze(['_JobStatus', '_PushStatus', '_Hooks', '_GlobalConfig']);
 
 // 10 alpha numberic chars + uppercase
 const userIdRegex = /^[a-zA-Z0-9]{10}$/;
@@ -258,13 +277,19 @@ const injectDefaultSchema = ({className, fields, classLevelPermissions}) => ({
   classLevelPermissions,
 });
 
-const VolatileClassesSchemas = volatileClasses.map((className) => {
-  return convertSchemaToAdapterSchema(injectDefaultSchema({
-    className,
+const _HooksSchema =  {className: "_Hooks", fields: defaultColumns._Hooks};
+const _GlobalConfigSchema = { className: "_GlobalConfig", fields: defaultColumns._GlobalConfig }
+const _PushStatusSchema = convertSchemaToAdapterSchema(injectDefaultSchema({
+    className: "_PushStatus",
     fields: {},
     classLevelPermissions: {}
-  }));
-});
+}));
+const _JobStatusSchema = convertSchemaToAdapterSchema(injectDefaultSchema({
+    className: "_JobStatus",
+    fields: {},
+    classLevelPermissions: {}
+}));
+const VolatileClassesSchemas = [_HooksSchema, _JobStatusSchema, _PushStatusSchema, _GlobalConfigSchema];
 
 const dbTypeMatchesObjectType = (dbType, objectType) => {
   if (dbType.type !== objectType.type) return false;
@@ -272,6 +297,13 @@ const dbTypeMatchesObjectType = (dbType, objectType) => {
   if (dbType === objectType.type) return true;
   if (dbType.type === objectType.type) return true;
   return false;
+}
+
+const typeToString = (type) => {
+  if (type.targetClass) {
+    return `${type.type}<${type.targetClass}>`;
+  }
+  return `${type.type || type}`;
 }
 
 // Stores the entire schema of the app in a weird hybrid format somewhere between
@@ -291,15 +323,20 @@ export default class SchemaController {
   }
 
   reloadData(options = {clearCache: false}) {
+    let promise = Promise.resolve();
     if (options.clearCache) {
-      this._cache.clear();
+      promise = promise.then(() => {
+        return this._cache.clear();
+      });
     }
     if (this.reloadDataPromise && !options.clearCache) {
       return this.reloadDataPromise;
     }
     this.data = {};
     this.perms = {};
-    this.reloadDataPromise = this.getAllClasses(options)
+    this.reloadDataPromise = promise.then(() => {
+      return this.getAllClasses(options);
+    })
     .then(allSchemas => {
       allSchemas.forEach(schema => {
         this.data[schema.className] = injectDefaultSchema(schema).fields;
@@ -323,10 +360,13 @@ export default class SchemaController {
   }
 
   getAllClasses(options = {clearCache: false}) {
+    let promise = Promise.resolve();
     if (options.clearCache) {
-      this._cache.clear();
+      promise = this._cache.clear();
     }
-    return this._cache.getAllClasses().then((allClasses) => {
+    return promise.then(() => {
+       return this._cache.getAllClasses()
+    }).then((allClasses) => {
       if (allClasses && allClasses.length && !options.clearCache) {
         return Promise.resolve(allClasses);
       }
@@ -341,22 +381,25 @@ export default class SchemaController {
   }
 
   getOneSchema(className, allowVolatileClasses = false, options = {clearCache: false}) {
+    let promise = Promise.resolve();
     if (options.clearCache) {
-      this._cache.clear();
+      promise = this._cache.clear();
     }
-    if (allowVolatileClasses && volatileClasses.indexOf(className) > -1) {
-    	return Promise.resolve(this.data[className]);
-    }
-    return this._cache.getOneSchema(className).then((cached) => {
-      if (cached && !options.clearCache) {
-        return Promise.resolve(cached);
+    return promise.then(() => {
+      if (allowVolatileClasses && volatileClasses.indexOf(className) > -1) {
+        return Promise.resolve(this.data[className]);
       }
-      return this._dbAdapter.getClass(className)
-      .then(injectDefaultSchema)
-      .then((result) => {
-        return this._cache.setOneSchema(className, result).then(() => {
-          return result;
-        })
+      return this._cache.getOneSchema(className).then((cached) => {
+        if (cached && !options.clearCache) {
+          return Promise.resolve(cached);
+        }
+        return this._dbAdapter.getClass(className)
+        .then(injectDefaultSchema)
+        .then((result) => {
+          return this._cache.setOneSchema(className, result).then(() => {
+            return result;
+          })
+        });
       });
     });
   }
@@ -377,8 +420,9 @@ export default class SchemaController {
     return this._dbAdapter.createClass(className, convertSchemaToAdapterSchema({ fields, classLevelPermissions, className }))
     .then(convertAdapterSchemaToParseSchema)
     .then((res) => {
-      this._cache.clear();
-      return res;
+      return this._cache.clear().then(() => {
+         return Promise.resolve(res);
+      });
     })
     .catch(error => {
       if (error && error.code === Parse.Error.DUPLICATE_VALUE) {
@@ -476,6 +520,7 @@ export default class SchemaController {
       }
     })
     .catch(error => {
+      console.error(error);
       // The schema still doesn't validate. Give up
       throw new Parse.Error(Parse.Error.INVALID_JSON, 'schema class name does not revalidate');
     });
@@ -567,7 +612,7 @@ export default class SchemaController {
         if (!dbTypeMatchesObjectType(expectedType, type)) {
           throw new Parse.Error(
             Parse.Error.INCORRECT_TYPE,
-            `schema mismatch for ${className}.${fieldName}; expected ${expectedType.type || expectedType} but got ${type.type}`
+            `schema mismatch for ${className}.${fieldName}; expected ${typeToString(expectedType)} but got ${typeToString(type)}`
           );
         }
         return this;

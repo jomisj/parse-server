@@ -26,27 +26,31 @@ describe('server', () => {
   });
 
   it('support http basic authentication with masterkey', done => {
-    request.get({
-      url: 'http://localhost:8378/1/classes/TestObject',
-      headers: {
-      	'Authorization': 'Basic ' + new Buffer('test:' + 'test').toString('base64')
-      }
-    }, (error, response, body) => {
-      expect(response.statusCode).toEqual(200);
-      done();
-    });
+    reconfigureServer({ appId: 'test' }).then(() => {
+      request.get({
+        url: 'http://localhost:8378/1/classes/TestObject',
+        headers: {
+          'Authorization': 'Basic ' + new Buffer('test:' + 'test').toString('base64')
+        }
+      }, (error, response, body) => {
+        expect(response.statusCode).toEqual(200);
+        done();
+      });
+    })
   });
 
   it('support http basic authentication with javascriptKey', done => {
-    request.get({
-      url: 'http://localhost:8378/1/classes/TestObject',
-      headers: {
-      	'Authorization': 'Basic ' + new Buffer('test:javascript-key=' + 'test').toString('base64')
-      }
-    }, (error, response, body) => {
-      expect(response.statusCode).toEqual(200);
-      done();
-    });
+    reconfigureServer({ appId: 'test' }).then(() => {
+      request.get({
+        url: 'http://localhost:8378/1/classes/TestObject',
+        headers: {
+          'Authorization': 'Basic ' + new Buffer('test:javascript-key=' + 'test').toString('base64')
+        }
+      }, (error, response, body) => {
+        expect(response.statusCode).toEqual(200);
+        done();
+      });
+    })
   });
 
   it('fails if database is unreachable', done => {
@@ -244,6 +248,7 @@ describe('server', () => {
     expect(ParseServer.GCSAdapter).toThrow('GCSAdapter is not provided by parse-server anymore; please install parse-server-gcs-adapter');
     expect(ParseServer.FileSystemAdapter).toThrow();
     expect(ParseServer.InMemoryCacheAdapter).toThrow();
+    expect(ParseServer.NullCacheAdapter).toThrow();
     done();
   });
 

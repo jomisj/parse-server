@@ -96,7 +96,8 @@ const userSchema = {
     "username": {"type": "String"},
     "password": {"type": "String"},
     "email": {"type": "String"},
-    "emailVerified": {"type": "Boolean"}
+    "emailVerified": {"type": "Boolean"},
+    "authData": {"type": "Object"}
   },
   "classLevelPermissions": defaultClassLevelPermissions,
 }
@@ -170,7 +171,7 @@ describe('schemas', () => {
     });
   });
 
-  it_exclude_dbs(['postgres'])('responds with a list of schemas after creating objects', done => {
+  it('responds with a list of schemas after creating objects', done => {
     var obj1 = hasAllPODobject();
     obj1.save().then(savedObj1 => {
       var obj2 = new Parse.Object('HasPointersAndRelations');
@@ -193,7 +194,7 @@ describe('schemas', () => {
     });
   });
 
-  it_exclude_dbs(['postgres'])('responds with a single schema', done => {
+  it('responds with a single schema', done => {
     var obj = hasAllPODobject();
     obj.save().then(() => {
       request.get({
@@ -207,7 +208,7 @@ describe('schemas', () => {
     });
   });
 
-  it_exclude_dbs(['postgres'])('treats class names case sensitively', done => {
+  it('treats class names case sensitively', done => {
     var obj = hasAllPODobject();
     obj.save().then(() => {
       request.get({
@@ -462,7 +463,7 @@ describe('schemas', () => {
     });
   });
 
-  it_exclude_dbs(['postgres'])('refuses to put to existing fields, even if it would not be a change', done => {
+  it('refuses to put to existing fields, even if it would not be a change', done => {
     var obj = hasAllPODobject();
     obj.save()
     .then(() => {
@@ -484,7 +485,7 @@ describe('schemas', () => {
     })
   });
 
-  it_exclude_dbs(['postgres'])('refuses to delete non-existent fields', done => {
+  it('refuses to delete non-existent fields', done => {
     var obj = hasAllPODobject();
     obj.save()
     .then(() => {
@@ -506,7 +507,7 @@ describe('schemas', () => {
     });
   });
 
-  it_exclude_dbs(['postgres'])('refuses to add a geopoint to a class that already has one', done => {
+  it('refuses to add a geopoint to a class that already has one', done => {
     var obj = hasAllPODobject();
     obj.save()
     .then(() => {
@@ -552,7 +553,7 @@ describe('schemas', () => {
     });
   });
 
-  it_exclude_dbs(['postgres'])('allows you to delete and add a geopoint in the same request', done => {
+  it('allows you to delete and add a geopoint in the same request', done => {
     var obj = new Parse.Object('NewClass');
     obj.set('geo1', new Parse.GeoPoint({latitude: 0, longitude: 0}));
     obj.save()
@@ -584,7 +585,7 @@ describe('schemas', () => {
     })
   });
 
-  it_exclude_dbs(['postgres'])('put with no modifications returns all fields', done => {
+  it('put with no modifications returns all fields', done => {
     var obj = hasAllPODobject();
     obj.save()
     .then(() => {
@@ -676,6 +677,7 @@ describe('schemas', () => {
             password: {type: 'String'},
             email: {type: 'String'},
             emailVerified: {type: 'Boolean'},
+            authData: {type: 'Object'},
             newField: {type: 'String'},
             ACL: {type: 'ACL'}
           },
@@ -696,6 +698,7 @@ describe('schemas', () => {
               password: {type: 'String'},
               email: {type: 'String'},
               emailVerified: {type: 'Boolean'},
+              authData: {type: 'Object'},
               newField: {type: 'String'},
               ACL: {type: 'ACL'}
             },
@@ -757,7 +760,7 @@ describe('schemas', () => {
     });
   });
 
-  it_exclude_dbs(['postgres'])('will not delete any fields if the additions are invalid', done => {
+  it('will not delete any fields if the additions are invalid', done => {
     var obj = hasAllPODobject();
     obj.save()
     .then(() => {
@@ -798,7 +801,7 @@ describe('schemas', () => {
     });
   });
 
-  it_exclude_dbs(['postgres'])('refuses to delete non-empty collection', done => {
+  it('refuses to delete non-empty collection', done => {
     var obj = hasAllPODobject();
     obj.save()
     .then(() => {
@@ -829,7 +832,7 @@ describe('schemas', () => {
     })
   });
 
-  it_exclude_dbs(['postgres'])('does not fail when deleting nonexistant collections', done => {
+  it('does not fail when deleting nonexistant collections', done => {
     request.del({
       url: 'http://localhost:8378/1/schemas/Missing',
       headers: masterKeyHeaders,
@@ -841,7 +844,7 @@ describe('schemas', () => {
     });
   });
 
-  it_exclude_dbs(['postgres'])('deletes collections including join tables', done => {
+  it('deletes collections including join tables', done => {
     var obj = new Parse.Object('MyClass');
     obj.set('data', 'data');
     obj.save()
@@ -892,7 +895,7 @@ describe('schemas', () => {
     });
   });
 
-  it_exclude_dbs(['postgres'])('deletes schema when actual collection does not exist', done => {
+  it('deletes schema when actual collection does not exist', done => {
     request.post({
       url: 'http://localhost:8378/1/schemas/NewClassForDelete',
       headers: masterKeyHeaders,
@@ -920,7 +923,7 @@ describe('schemas', () => {
     });
   });
 
-  it_exclude_dbs(['postgres'])('deletes schema when actual collection exists', done => {
+  it('deletes schema when actual collection exists', done => {
     request.post({
       url: 'http://localhost:8378/1/schemas/NewClassForDelete',
       headers: masterKeyHeaders,
@@ -1286,10 +1289,8 @@ describe('schemas', () => {
     }).then((results) => {
       expect(results.length).toBe(1);
       done();
-    }, () => {
-      fail("should not fail!");
-      done();
     }).catch( (err) => {
+      jfail(err);
       done();
     })
   });
@@ -1351,15 +1352,13 @@ describe('schemas', () => {
     }).then((results) => {
       expect(results.length).toBe(1);
       done();
-    }, (err) => {
-      fail("should not fail!");
-      done();
     }).catch( (err) => {
+      jfail(err);
       done();
     })
   });
 
-  it_exclude_dbs(['postgres'])('validate CLP 3', done => {
+  it('validate CLP 3', done => {
     let user = new Parse.User();
     user.setUsername('user');
     user.setPassword('user');
@@ -1411,8 +1410,8 @@ describe('schemas', () => {
     }).then((results) => {
       expect(results.length).toBe(1);
       done();
-    }, (err) => {
-      fail("should not fail!");
+    }).catch((err) => {
+      jfail(err);
       done();
     });
   });
@@ -1477,10 +1476,8 @@ describe('schemas', () => {
     }).then((results) => {
       expect(results.length).toBe(1);
       done();
-    }, (err) => {
-      fail("should not fail!");
-      done();
     }).catch( (err) => {
+      jfail(err);
       done();
     })
   });
@@ -1582,7 +1579,7 @@ describe('schemas', () => {
     })
   })
 
-  it_exclude_dbs(['postgres'])('gives correct response when deleting a schema with CLPs (regression test #1919)', done => {
+  it('gives correct response when deleting a schema with CLPs (regression test #1919)', done => {
     new Parse.Object('MyClass').save({ data: 'foo'})
     .then(obj => obj.destroy())
     .then(() => setPermissionsOnClass('MyClass', { find: {}, get: {} }, true))
@@ -1630,6 +1627,42 @@ describe('schemas', () => {
       done();
     }).catch((err) => {
       fail('should not fail');
+      jfail(err);
+      done();
+    });
+  });
+
+  it('regression test for #2246', done => {
+    let profile = new Parse.Object('UserProfile');
+    let user = new Parse.User();
+    function initialize() {
+      return user.save({
+        username: 'user',
+        password: 'password'
+      }).then(() => {
+        return profile.save({user}).then(() => {
+        return user.save({
+            userProfile: profile
+          }, {useMasterKey: true});
+        });
+      });
+    }
+
+    initialize().then(() => {
+      return setPermissionsOnClass('UserProfile', {
+        'readUserFields': ['user'],
+        'writeUserFields': ['user']
+      }, true);
+    }).then(() => {
+      return Parse.User.logIn('user', 'password')
+    }).then(() => {
+      let query = new Parse.Query('_User');
+      query.include('userProfile');
+      return query.get(user.id);
+    }).then((user) => {
+      expect(user.get('userProfile')).not.toBeUndefined();
+      done();
+    }, (err) => {
       jfail(err);
       done();
     });

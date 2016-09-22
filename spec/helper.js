@@ -3,6 +3,17 @@
 
 jasmine.DEFAULT_TIMEOUT_INTERVAL = process.env.PARSE_SERVER_TEST_TIMEOUT || 5000;
 
+global.on_db = (db, callback, elseCallback) => {
+  if (process.env.PARSE_SERVER_TEST_DB == db) {
+    return callback();
+  } else if (!process.env.PARSE_SERVER_TEST_DB && db == 'mongo') {
+    return callback();
+  }
+  if (elseCallback) {
+    return elseCallback();
+  }
+}
+
 var cache = require('../src/cache').default;
 var express = require('express');
 var facebook = require('../src/authDataManager/facebook');
@@ -11,7 +22,9 @@ var path = require('path');
 var TestUtils = require('../src/TestUtils');
 var MongoStorageAdapter = require('../src/Adapters/Storage/Mongo/MongoStorageAdapter');
 const GridStoreAdapter = require('../src/Adapters/Files/GridStoreAdapter').GridStoreAdapter;
+const FSAdapter = require('parse-server-fs-adapter');
 const PostgresStorageAdapter = require('../src/Adapters/Storage/Postgres/PostgresStorageAdapter');
+const RedisCacheAdapter = require('../src/Adapters/Cache/RedisCacheAdapter').default;
 
 const mongoURI = 'mongodb://localhost:27017/parseServerMongoAdapterTestDatabase';
 const postgresURI = 'postgres://localhost:5432/parse_server_postgres_adapter_test_database';
@@ -40,7 +53,14 @@ if (process.env.PARSE_SERVER_TEST_DB === 'postgres') {
 
 var port = 8378;
 
-let gridStoreAdapter = new GridStoreAdapter(mongoURI);
+let filesAdapter;
+
+on_db('mongo', () => {
+  filesAdapter = new GridStoreAdapter(mongoURI);
+}, () => {
+  filesAdapter = new FSAdapter();
+});
+
 let logLevel;
 let silent = true;
 if (process.env.VERBOSE) {
@@ -53,7 +73,7 @@ if (process.env.PARSE_SERVER_LOG_LEVEL) {
 }
 // Default server configuration for tests.
 var defaultConfiguration = {
-  filesAdapter: gridStoreAdapter,
+  filesAdapter,
   serverURL: 'http://localhost:' + port + '/1',
   databaseAdapter,
   appId: 'test',
@@ -82,12 +102,19 @@ var defaultConfiguration = {
   }
 };
 
+if (process.env.PARSE_SERVER_TEST_CACHE === 'redis') {
+  defaultConfiguration.cacheAdapter = new RedisCacheAdapter();
+}
+
 let openConnections = {};
 
 // Set up a default API server for testing with default configuration.
 var app = express();
 var api = new ParseServer(defaultConfiguration);
 app.use('/1', api);
+app.use('/1', (req, res) => {
+  fail('should not call next');
+});
 var server = app.listen(port);
 server.on('connection', connection => {
   let key = `${connection.remoteAddress}:${connection.remotePort}`;
@@ -107,7 +134,9 @@ const reconfigureServer = changedConfiguration => {
         api = new ParseServer(newConfiguration);
         api.use(require('./testing-routes').router);
         app.use('/1', api);
-
+        app.use('/1', (req, res) => {
+          fail('should not call next');
+        });
         server = app.listen(port);
         server.on('connection', connection => {
           let key = `${connection.remoteAddress}:${connection.remotePort}`;
@@ -383,16 +412,6 @@ global.describe_only_db = db => {
   }
 }
 
-global.on_db = (db, callback, elseCallback) => {
-  if (process.env.PARSE_SERVER_TEST_DB == db) {
-    return callback();
-  } else if (!process.env.PARSE_SERVER_TEST_DB && db == 'mongo') {
-    return callback();
-  }
-  if (elseCallback) {
-    elseCallback();
-  }
-}
 
 var libraryCache = {};
 jasmine.mockLibrary = function(library, name, mock) {
