@@ -3,9 +3,9 @@
 
 var SchemaController = require('./Controllers/SchemaController');
 var Parse = require('parse/node').Parse;
+const triggers = require('./triggers');
 
-import { default as FilesController } from './Controllers/FilesController';
-
+const AlwaysSelectedKeys = ['objectId', 'createdAt', 'updatedAt'];
 // restOptions can include:
 //   skip
 //   limit
@@ -20,6 +20,7 @@ function RestQuery(config, auth, className, restWhere = {}, restOptions = {}, cl
   this.auth = auth;
   this.className = className;
   this.restWhere = restWhere;
+  this.restOptions = restOptions;
   this.clientSDK = clientSDK;
   this.response = null;
   this.findOptions = {};
@@ -32,11 +33,11 @@ function RestQuery(config, auth, className, restWhere = {}, restOptions = {}, cl
       }
       this.restWhere = {
         '$and': [this.restWhere, {
-           'user': {
-              __type: 'Pointer',
-              className: '_User',
-              objectId: this.auth.user.id
-           }
+          'user': {
+            __type: 'Pointer',
+            className: '_User',
+            objectId: this.auth.user.id
+          }
         }]
       };
     }
@@ -52,14 +53,36 @@ function RestQuery(config, auth, className, restWhere = {}, restOptions = {}, cl
   // this.include = [['foo'], ['foo', 'baz'], ['foo', 'bar']]
   this.include = [];
 
+  // If we have keys, we probably want to force some includes (n-1 level)
+  // See issue: https://github.com/ParsePlatform/parse-server/issues/3185
+  if (restOptions.hasOwnProperty('keys')) {
+    const keysForInclude = restOptions.keys.split(',').filter((key) => {
+      // At least 2 components
+      return key.split(".").length > 1;
+    }).map((key) => {
+      // Slice the last component (a.b.c -> a.b)
+      // Otherwise we'll include one level too much.
+      return key.slice(0, key.lastIndexOf("."));
+    }).join(',');
+
+    // Concat the possibly present include string with the one from the keys
+    // Dedup / sorting is handle in 'include' case.
+    if (keysForInclude.length > 0) {
+      if (!restOptions.include || restOptions.include.length == 0) {
+        restOptions.include = keysForInclude;
+      } else {
+        restOptions.include += "," + keysForInclude;
+      }
+    }
+  }
+
   for (var option in restOptions) {
     switch(option) {
-    case 'keys':
-      this.keys = new Set(restOptions.keys.split(','));
-      this.keys.add('objectId');
-      this.keys.add('createdAt');
-      this.keys.add('updatedAt');
+    case 'keys': {
+      const keys = restOptions.keys.split(',').concat(AlwaysSelectedKeys);
+      this.keys = Array.from(new Set(keys));
       break;
+    }
     case 'count':
       this.doCount = true;
       break;
@@ -79,22 +102,26 @@ function RestQuery(config, auth, className, restWhere = {}, restOptions = {}, cl
       }
       this.findOptions.sort = sortMap;
       break;
-    case 'include':
-      var paths = restOptions.include.split(',');
-      var pathSet = {};
-      for (var path of paths) {
-        // Add all prefixes with a .-split to pathSet
-        var parts = path.split('.');
-        for (var len = 1; len <= parts.length; len++) {
-          pathSet[parts.slice(0, len).join('.')] = true;
-        }
-      }
-      this.include = Object.keys(pathSet).sort((a, b) => {
-        return a.length - b.length;
-      }).map((s) => {
+    case 'include': {
+      const paths = restOptions.include.split(',');
+      // Load the existing includes (from keys)
+      const pathSet = paths.reduce((memo, path) => {
+        // Split each paths on . (a.b.c -> [a,b,c])
+        // reduce to create all paths
+        // ([a,b,c] -> {a: true, 'a.b': true, 'a.b.c': true})
+        return path.split('.').reduce((memo, path, index, parts) => {
+          memo[parts.slice(0, index+1).join('.')] = true;
+          return memo;
+        }, memo);
+      }, {});
+
+      this.include = Object.keys(pathSet).map((s) => {
         return s.split('.');
+      }).sort((a, b) => {
+        return a.length - b.length; // Sort by number of components
       });
       break;
+    }
     case 'redirectClassNameForKey':
       this.redirectKey = restOptions.redirectClassNameForKey;
       this.redirectClassName = null;
@@ -111,15 +138,17 @@ function RestQuery(config, auth, className, restWhere = {}, restOptions = {}, cl
 // Returns a promise for the response - an object with optional keys
 // 'results' and 'count'.
 // TODO: consolidate the replaceX functions
-RestQuery.prototype.execute = function() {
+RestQuery.prototype.execute = function(executeOptions) {
   return Promise.resolve().then(() => {
     return this.buildRestWhere();
   }).then(() => {
-    return this.runFind();
+    return this.runFind(executeOptions);
   }).then(() => {
     return this.runCount();
   }).then(() => {
     return this.handleInclude();
+  }).then(() => {
+    return this.runAfterFindTrigger();
   }).then(() => {
     return this.response;
   });
@@ -183,7 +212,7 @@ RestQuery.prototype.validateClientClassCreation = function() {
                                 'This user is not allowed to access ' +
                                 'non-existent class: ' + this.className);
         }
-    });
+      });
   } else {
     return Promise.resolve();
   }
@@ -223,7 +252,7 @@ RestQuery.prototype.replaceInQuery = function() {
                           'improper usage of $inQuery');
   }
 
-  let additionalOptions = {
+  const additionalOptions = {
     redirectClassNameForKey: inQueryValue.redirectClassNameForKey
   };
 
@@ -271,7 +300,7 @@ RestQuery.prototype.replaceNotInQuery = function() {
                           'improper usage of $notInQuery');
   }
 
-  let additionalOptions = {
+  const additionalOptions = {
     redirectClassNameForKey: notInQueryValue.redirectClassNameForKey
   };
 
@@ -321,7 +350,7 @@ RestQuery.prototype.replaceSelect = function() {
                           'improper usage of $select');
   }
 
-  let additionalOptions = {
+  const additionalOptions = {
     redirectClassNameForKey: selectValue.query.redirectClassNameForKey
   };
 
@@ -369,7 +398,7 @@ RestQuery.prototype.replaceDontSelect = function() {
     throw new Parse.Error(Parse.Error.INVALID_QUERY,
                           'improper usage of $dontSelect');
   }
-  let additionalOptions = {
+  const additionalOptions = {
     redirectClassNameForKey: dontSelectValue.query.redirectClassNameForKey
   };
 
@@ -383,54 +412,66 @@ RestQuery.prototype.replaceDontSelect = function() {
   })
 };
 
+const cleanResultOfSensitiveUserInfo = function (result, auth, config) {
+  delete result.password;
+
+  if (auth.isMaster || (auth.user && auth.user.id === result.objectId)) {
+    return;
+  }
+
+  for (const field of config.userSensitiveFields) {
+    delete result[field];
+  }
+};
+
+const cleanResultAuthData = function (result) {
+  if (result.authData) {
+    Object.keys(result.authData).forEach((provider) => {
+      if (result.authData[provider] === null) {
+        delete result.authData[provider];
+      }
+    });
+
+    if (Object.keys(result.authData).length == 0) {
+      delete result.authData;
+    }
+  }
+};
+
 // Returns a promise for whether it was successful.
 // Populates this.response with an object that only has 'results'.
-RestQuery.prototype.runFind = function() {
+RestQuery.prototype.runFind = function(options = {}) {
   if (this.findOptions.limit === 0) {
     this.response = {results: []};
     return Promise.resolve();
   }
+  const findOptions = Object.assign({}, this.findOptions);
+  if (this.keys) {
+    findOptions.keys = this.keys.map((key) => {
+      return key.split('.')[0];
+    });
+  }
+  if (options.op) {
+    findOptions.op = options.op;
+  }
   return this.config.database.find(
-    this.className, this.restWhere, this.findOptions).then((results) => {
-    if (this.className === '_User') {
-      for (var result of results) {
-        delete result.password;
-
-        if (result.authData) {
-          Object.keys(result.authData).forEach((provider) => {
-            if (result.authData[provider] === null) {
-              delete result.authData[provider];
-            }
-          });
-          if (Object.keys(result.authData).length == 0) {
-            delete result.authData;
-          }
+    this.className, this.restWhere, findOptions).then((results) => {
+      if (this.className === '_User') {
+        for (var result of results) {
+          cleanResultOfSensitiveUserInfo(result, this.auth, this.config);
+          cleanResultAuthData(result);
         }
       }
-    }
 
-    this.config.filesController.expandFilesInObject(this.config, results);
+      this.config.filesController.expandFilesInObject(this.config, results);
 
-    if (this.keys) {
-      var keySet = this.keys;
-      results = results.map((object) => {
-        var newObject = {};
-        for (var key in object) {
-          if (keySet.has(key)) {
-            newObject[key] = object[key];
-          }
+      if (this.redirectClassName) {
+        for (var r of results) {
+          r.className = this.redirectClassName;
         }
-        return newObject;
-      });
-    }
-
-    if (this.redirectClassName) {
-      for (var r of results) {
-        r.className = this.redirectClassName;
       }
-    }
-    this.response = {results: results};
-  });
+      this.response = {results: results};
+    });
 };
 
 // Returns a promise for whether it was successful.
@@ -455,7 +496,7 @@ RestQuery.prototype.handleInclude = function() {
   }
 
   var pathResponse = includePath(this.config, this.auth,
-                                 this.response, this.include[0]);
+                                 this.response, this.include[0], this.restOptions);
   if (pathResponse.then) {
     return pathResponse.then((newResponse) => {
       this.response = newResponse;
@@ -470,32 +511,67 @@ RestQuery.prototype.handleInclude = function() {
   return pathResponse;
 };
 
+//Returns a promise of a processed set of results
+RestQuery.prototype.runAfterFindTrigger = function() {
+  if (!this.response) {
+    return;
+  }
+  // Avoid doing any setup for triggers if there is no 'afterFind' trigger for this class.
+  const hasAfterFindHook = triggers.triggerExists(this.className, triggers.Types.afterFind, this.config.applicationId);
+  if (!hasAfterFindHook) {
+    return Promise.resolve();
+  }
+  // Run afterFind trigger and set the new results
+  return triggers.maybeRunAfterFindTrigger(triggers.Types.afterFind, this.auth, this.className,this.response.results, this.config).then((results) => {
+    this.response.results = results;
+  });
+};
+
 // Adds included values to the response.
 // Path is a list of field names.
 // Returns a promise for an augmented response.
-function includePath(config, auth, response, path) {
+function includePath(config, auth, response, path, restOptions = {}) {
   var pointers = findPointers(response.results, path);
   if (pointers.length == 0) {
     return response;
   }
-  let pointersHash = {};
-  var objectIds = {};
+  const pointersHash = {};
   for (var pointer of pointers) {
     if (!pointer) {
       continue;
     }
-    let className = pointer.className;
+    const className = pointer.className;
     // only include the good pointers
     if (className) {
-      pointersHash[className] = pointersHash[className] || [];
-      pointersHash[className].push(pointer.objectId);
+      pointersHash[className] = pointersHash[className] || new Set();
+      pointersHash[className].add(pointer.objectId);
+    }
+  }
+  const includeRestOptions = {};
+  if (restOptions.keys) {
+    const keys = new Set(restOptions.keys.split(','));
+    const keySet = Array.from(keys).reduce((set, key) => {
+      const keyPath = key.split('.');
+      let i=0;
+      for (i; i<path.length; i++) {
+        if (path[i] != keyPath[i]) {
+          return set;
+        }
+      }
+      if (i < keyPath.length) {
+        set.add(keyPath[i]);
+      }
+      return set;
+    }, new Set());
+    if (keySet.size > 0) {
+      includeRestOptions.keys = Array.from(keySet).join(',');
     }
   }
 
-  let queryPromises = Object.keys(pointersHash).map((className) => {
-    var where = {'objectId': {'$in': pointersHash[className]}};
-    var query = new RestQuery(config, auth, className, where);
-    return query.execute().then((results) => {
+  const queryPromises = Object.keys(pointersHash).map((className) => {
+    const where = {'objectId': {'$in': Array.from(pointersHash[className])}};
+    var query = new RestQuery(config, auth, className, where, includeRestOptions);
+    return query.execute({op: 'get'}).then((results) => {
       results.className = className;
       return Promise.resolve(results);
     })
@@ -541,7 +617,7 @@ function findPointers(object, path) {
     return answer;
   }
 
-  if (typeof object !== 'object') {
+  if (typeof object !== 'object' || !object) {
     return [];
   }
 
@@ -568,10 +644,10 @@ function findPointers(object, path) {
 function replacePointers(object, path, replace) {
   if (object instanceof Array) {
     return object.map((obj) => replacePointers(obj, path, replace))
-             .filter((obj) => typeof obj !== 'undefined');
+             .filter((obj) => typeof obj !== 'undefined');
   }
 
-  if (typeof object !== 'object') {
+  if (typeof object !== 'object' || !object) {
     return object;
   }
 
@@ -606,7 +682,7 @@ function findObjectWithKey(root, key) {
   }
   if (root instanceof Array) {
     for (var item of root) {
-      var answer = findObjectWithKey(item, key);
+      const answer = findObjectWithKey(item, key);
       if (answer) {
         return answer;
       }
@@ -616,7 +692,7 @@ function findObjectWithKey(root, key) {
     return root;
   }
   for (var subkey in root) {
-    var answer = findObjectWithKey(root[subkey], key);
+    const answer = findObjectWithKey(root[subkey], key);
     if (answer) {
       return answer;
     }

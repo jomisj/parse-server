@@ -1,7 +1,11 @@
 "use strict"
 // Sets up a Parse API server for testing.
+const SpecReporter = require('jasmine-spec-reporter');
 
 jasmine.DEFAULT_TIMEOUT_INTERVAL = process.env.PARSE_SERVER_TEST_TIMEOUT || 5000;
+
+jasmine.getEnv().clearReporters();
+jasmine.getEnv().addReporter(new SpecReporter());
 
 global.on_db = (db, callback, elseCallback) => {
   if (process.env.PARSE_SERVER_TEST_DB == db) {
@@ -14,9 +18,13 @@ global.on_db = (db, callback, elseCallback) => {
   }
 }
 
+if (global._babelPolyfill) {
+  console.error('We should not use polyfilled tests');
+  process.exit(1);
+}
+
 var cache = require('../src/cache').default;
 var express = require('express');
-var facebook = require('../src/authDataManager/facebook');
 var ParseServer = require('../src/index').ParseServer;
 var path = require('path');
 var TestUtils = require('../src/TestUtils');
@@ -31,12 +39,12 @@ const postgresURI = 'postgres://localhost:5432/parse_server_postgres_adapter_tes
 let databaseAdapter;
 // need to bind for mocking mocha
 
-let startDB = () => {};
-let stopDB = () => {};
+let startDB = () => {};
+let stopDB = () => {};
 
 if (process.env.PARSE_SERVER_TEST_DB === 'postgres') {
   databaseAdapter = new PostgresStorageAdapter({
-    uri: postgresURI,
+    uri: process.env.PARSE_SERVER_TEST_DATABASE_URI || postgresURI,
     collectionPrefix: 'test_',
   });
 } else {
@@ -44,7 +52,7 @@ if (process.env.PARSE_SERVER_TEST_DB === 'postgres') {
     timeout: () => {},
     slow: () => {}
   });
-  stopDB = require('mongodb-runner/mocha/after');;
+  stopDB = require('mongodb-runner/mocha/after');
   databaseAdapter = new MongoStorageAdapter({
     uri: mongoURI,
     collectionPrefix: 'test_',
@@ -55,9 +63,9 @@ var port = 8378;
 
 let filesAdapter;
 
-on_db('mongo', () => {
+on_db('mongo', () => {
   filesAdapter = new GridStoreAdapter(mongoURI);
-}, () => {
+}, () => {
   filesAdapter = new FSAdapter();
 });
 
@@ -94,7 +102,7 @@ var defaultConfiguration = {
       bundleId: 'bundleId',
     }
   },
-  oauth: { // Override the facebook provider
+  auth: { // Override the facebook provider
     facebook: mockFacebook(),
     myoauth: {
       module: path.resolve(__dirname, "myoauth") // relative path as it's run from src
@@ -106,18 +114,18 @@ if (process.env.PARSE_SERVER_TEST_CACHE === 'redis') {
   defaultConfiguration.cacheAdapter = new RedisCacheAdapter();
 }
 
-let openConnections = {};
+const openConnections = {};
 
 // Set up a default API server for testing with default configuration.
 var app = express();
 var api = new ParseServer(defaultConfiguration);
 app.use('/1', api);
-app.use('/1', (req, res) => {
+app.use('/1', () => {
   fail('should not call next');
 });
 var server = app.listen(port);
 server.on('connection', connection => {
-  let key = `${connection.remoteAddress}:${connection.remotePort}`;
+  const key = `${connection.remoteAddress}:${connection.remotePort}`;
   openConnections[key] = connection;
   connection.on('close', () => { delete openConnections[key] });
 });
@@ -126,7 +134,7 @@ const reconfigureServer = changedConfiguration => {
   return new Promise((resolve, reject) => {
     server.close(() => {
       try {
-        let newConfiguration = Object.assign({}, defaultConfiguration, changedConfiguration, {
+        const newConfiguration = Object.assign({}, defaultConfiguration, changedConfiguration, {
           __indexBuildCompletionCallbackForTests: indexBuildPromise => indexBuildPromise.then(resolve, reject)
         });
         cache.clear();
@@ -134,12 +142,12 @@ const reconfigureServer = changedConfiguration => {
         api = new ParseServer(newConfiguration);
         api.use(require('./testing-routes').router);
         app.use('/1', api);
-        app.use('/1', (req, res) => {
+        app.use('/1', () => {
           fail('should not call next');
         });
         server = app.listen(port);
         server.on('connection', connection => {
-          let key = `${connection.remoteAddress}:${connection.remotePort}`;
+          const key = `${connection.remoteAddress}:${connection.remotePort}`;
           openConnections[key] = connection;
           connection.on('close', () => { delete openConnections[key] });
         });
@@ -186,7 +194,7 @@ beforeEach(done => {
     Parse.initialize('test', 'test', 'test');
     Parse.serverURL = 'http://localhost:' + port + '/1';
     done();
-  }, error => {
+  }, () => {
     Parse.initialize('test', 'test', 'test');
     Parse.serverURL = 'http://localhost:' + port + '/1';
     // fail(JSON.stringify(error));
@@ -195,7 +203,7 @@ beforeEach(done => {
 });
 
 afterEach(function(done) {
-  let afterLogOut = () => {
+  const afterLogOut = () => {
     if (Object.keys(openConnections).length > 0) {
       fail('There were open connections to the server left after the test finished');
     }
@@ -214,7 +222,7 @@ afterEach(function(done) {
         } else {
           // Other system classes will break Parse.com, so make sure that we don't save anything to _SCHEMA that will
           // break it.
-          return ['_User', '_Installation', '_Role', '_Session', '_Product'].includes(className);
+          return ['_User', '_Installation', '_Role', '_Session', '_Product'].indexOf(className) >= 0;
         }
       }});
     });
@@ -275,7 +283,7 @@ function notEqual(a, b, message) {
 function expectSuccess(params, done) {
   return {
     success: params.success,
-    error: function(e) {
+    error: function() {
       fail('failure happened in expectSuccess');
       done ? done() : null;
     },
@@ -362,7 +370,6 @@ function mockFacebook() {
 }
 
 
-
 // This is polluting, but, it makes it way easier to directly port old tests.
 global.Parse = Parse;
 global.TestObject = TestObject;
@@ -387,7 +394,7 @@ global.jfail = function(err) {
 }
 
 global.it_exclude_dbs = excluded => {
-  if (excluded.includes(process.env.PARSE_SERVER_TEST_DB)) {
+  if (excluded.indexOf(process.env.PARSE_SERVER_TEST_DB) >= 0) {
     return xit;
   } else {
     return it;
@@ -395,7 +402,7 @@ global.it_exclude_dbs = excluded => {
 }
 
 global.fit_exclude_dbs = excluded => {
-  if (excluded.includes(process.env.PARSE_SERVER_TEST_DB)) {
+  if (excluded.indexOf(process.env.PARSE_SERVER_TEST_DB) >= 0) {
     return xit;
   } else {
     return fit;
@@ -408,7 +415,7 @@ global.describe_only_db = db => {
   } else if (!process.env.PARSE_SERVER_TEST_DB && db == 'mongo') {
     return describe;
   } else {
-    return () => {};
+    return () => {};
   }
 }
 

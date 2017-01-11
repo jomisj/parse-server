@@ -1,52 +1,13 @@
-function numberParser(key) {
-  return function(opt) {
-    opt = parseInt(opt);
-    if (!Number.isInteger(opt)) {
-      throw new Error(`The ${key} is invalid`);
-    }
-    return opt;
-  }
-}
+import {
+  numberParser,
+  numberOrBoolParser,
+  objectParser,
+  arrayParser,
+  moduleOrObjectParser,
+  booleanParser,
+  nullParser
+} from '../utils/parsers';
 
-function numberOrBoolParser(key) {
-  return function(opt) {
-    if (typeof opt === 'boolean') {
-      return opt;
-    }
-    return numberParser(key)(opt);
-  }
-}
-
-function objectParser(opt) {
-  if (typeof opt == 'object') {
-    return opt;
-  }
-  return JSON.parse(opt)
-}
-
-function moduleOrObjectParser(opt) {
-  if (typeof opt == 'object')  {
-    return opt;
-  }
-  try {
-    return JSON.parse(opt);
-  } catch(e) {}
-  return opt;
-}
-
-function booleanParser(opt) {
-  if (opt == true || opt == "true" || opt == "1") {
-    return true;
-  }
-  return false;
-}
-
-function nullParser(opt) {
-  if (opt == 'null') {
-    return null;
-  }
-  return opt;
-}
 
 export default {
   "appId": {
@@ -60,10 +21,15 @@ export default {
     required: true
   },
   "port": {
-     env: "PORT",
-     help: "The port to run the ParseServer. defaults to 1337.",
-     default: 1337,
-     action: numberParser("port")
+    env: "PORT",
+    help: "The port to run the ParseServer. defaults to 1337.",
+    default: 1337,
+    action: numberParser("port")
+  },
+  "host": {
+    env: "PARSE_SERVER_HOST",
+    help: "The host to serve ParseServer on. defaults to 0.0.0.0",
+    default: '0.0.0.0',
   },
   "databaseURI": {
     env: "PARSE_SERVER_DATABASE_URI",
@@ -117,7 +83,12 @@ export default {
   },
   "oauth": {
     env: "PARSE_SERVER_OAUTH_PROVIDERS",
-    help: "Configuration for your oAuth providers, as stringified JSON. See https://github.com/ParsePlatform/parse-server/wiki/Parse-Server-Guide#oauth",
+    help: "[DEPRECATED (use auth option)] Configuration for your oAuth providers, as stringified JSON. See https://github.com/ParsePlatform/parse-server/wiki/Parse-Server-Guide#oauth",
+    action: objectParser
+  },
+  "auth": {
+    env: "PARSE_SERVER_AUTH_PROVIDERS",
+    help: "Configuration for your authentication providers, as stringified JSON. See https://github.com/ParsePlatform/parse-server/wiki/Parse-Server-Guide#oauth",
     action: objectParser
   },
   "fileKey": {
@@ -126,10 +97,14 @@ export default {
   },
   "facebookAppIds": {
     env: "PARSE_SERVER_FACEBOOK_APP_IDS",
-    help: "Comma separated list for your facebook app Ids",
-    type: "list",
-    action: function(opt) {
-      return opt.split(",")
+    help: "[DEPRECATED (use auth option)]",
+    action: function() {
+      throw 'facebookAppIds is deprecated, please use { auth: \
+         {facebook: \
+           { appIds: [] } \
+          }\
+        }\
+      }';
     }
   },
   "enableAnonymousUsers": {
@@ -177,6 +152,11 @@ export default {
     help: "account lockout policy for failed login attempts",
     action: objectParser
   },
+  "passwordPolicy": {
+    env: "PARSE_SERVER_PASSWORD_POLICY",
+    help: "Password policy for enforcing password related rules",
+    action: objectParser
+  },
   "appName": {
     env: "PARSE_SERVER_APP_NAME",
     help: "Sets the app name"
@@ -185,11 +165,6 @@ export default {
     env: "PARSE_SERVER_LOGGER_ADAPTER",
     help: "Adapter module for the logging sub-system",
     action: moduleOrObjectParser
-  },
-  "liveQuery": {
-    env: "PARSE_SERVER_LIVE_QUERY_OPTIONS",
-    help: "liveQuery options",
-    action: objectParser
   },
   "customPages": {
     env: "PARSE_SERVER_CUSTOM_PAGES",
@@ -200,6 +175,10 @@ export default {
     env: "PARSE_SERVER_MAX_UPLOAD_SIZE",
     help: "Max file size for uploads.",
     default: "20mb"
+  },
+  "userSensitiveFields": {
+    help: "Personally identifiable information fields in the user table the should be removed for non-authorized users.",
+    default: "email"
   },
   "sessionLength": {
     env: "PARSE_SERVER_SESSION_LENGTH",
@@ -236,8 +215,38 @@ export default {
     help: "The TTL for caching the schema for optimizing read/write operations. You should put a long TTL when your DB is in production. default to 0; disabled.",
     action: numberParser("schemaCacheTTL"),
   },
+  "enableSingleSchemaCache": {
+    env: "PARSE_SERVER_ENABLE_SINGLE_SCHEMA_CACHE",
+    help: "Use a single schema cache shared across requests. Reduces number of queries made to _SCHEMA. Defaults to false, i.e. unique schema cache per request.",
+    action: booleanParser
+  },
   "cluster": {
+    env: "PARSE_SERVER_CLUSTER",
     help: "Run with cluster, optionally set the number of processes default to os.cpus().length",
     action: numberOrBoolParser("cluster")
-  }
+  },
+  "liveQuery": {
+    env: "PARSE_SERVER_LIVE_QUERY_OPTIONS",
+    help: "parse-server's LiveQuery configuration object",
+    action: objectParser
+  },
+  "liveQuery.classNames": {
+    help: "parse-server's LiveQuery classNames",
+    action: arrayParser
+  },
+  "liveQuery.redisURL": {
+    help: "parse-server's LiveQuery redisURL",
+  },
+  "startLiveQueryServer": {
+    help: "Starts the liveQuery server",
+    action: booleanParser
+  },
+  "liveQueryPort": {
+    help: 'Specific port to start the live query server',
+    action: numberParser("liveQueryPort")
+  },
+  "liveQueryServerOptions": {
+    help: "Live query server configuration options (will start the liveQuery server)",
+    action: objectParser
+  },
 };

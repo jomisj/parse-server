@@ -1,5 +1,130 @@
 ## Parse Server Changelog
 
+### 2.3.2
+[Full Changelog](https://github.com/ParsePlatform/parse-server/compare/2.3.1...2.3.2)
+
+#### New features
+* Add parseFrameURL for masking user-facing pages (#3267), thanks to  [Lenart Rudel](https://github.com/lenart)
+
+#### Bug fixes
+* Fix Parse-Server to work with winston-daily-rotate-1.4.2 (#3335), thanks to [Arthur Cinader](https://github.com/acinader)
+
+#### Improvements
+* Add support for regex string for password policy validatorPattern setting (#3331), thanks to [Bhaskar Reddy Yasa](https://github.com/bhaskaryasa)
+* LiveQuery should match subobjects with dot notation (#3322), thanks to [David Starke](https://github.com/dstarke)
+* Reduce time to process high number of installations for push (#3264), thanks to [jeacott1](https://github.com/jeacott1)
+* Fix trivial typo in error message (#3238), thanks to [Arthur Cinader](https://github.com/acinader)
+
+### 2.3.1
+[Full Changelog](https://github.com/ParsePlatform/parse-server/compare/2.3.0...2.3.1)
+
+A major issue was introduced when refactoring the authentication modules.
+This release addresses only that issue.
+
+### 2.3.0
+[Full Changelog](https://github.com/ParsePlatform/parse-server/compare/2.2.25...2.3.0)
+
+#### Breaking changes
+* Parse.Cloud.useMasterKey() is a no-op, please refer to (Cloud Code migration guide)[https://github.com/ParsePlatform/parse-server/wiki/Compatibility-with-Hosted-Parse#cloud-code]
+* Authentication helpers are now proper adapters, deprecates oauth option in favor of auth.
+* DEPRECATES: facebookAppIds, use `auth: { facebook: { appIds: ["AAAAAAAAA" ] } }`
+* `email` field is not returned anymore for `Parse.User` queries. (Provided only on the user itself if provided).
+
+#### New Features
+* Adds ability to restrict access through Class Level Permissions to only authenticated users [see docs](http://parseplatform.github.io/docs/ios/guide/#requires-authentication-permission-requires-parse-server---230)
+* Adds ability to strip sensitive data from _User responses, strips emails by default, thanks to [Arthur Cinader](https://github.com/acinader)
+* Adds password history support for password policies, thanks to [Bhaskar Reddy Yasa](https://github.com/bhaskaryasa)
+
+#### Improvements
+* Bump parse-server-s3-adapter to 1.0.6, thanks to [Arthur Cinader](https://github.com/acinader)
+* Using PARSE_SERVER_ENABLE_EXPERIMENTAL_DIRECT_ACCESS let you create user sessions when passing {installationId: "xxx-xxx"} on signup in cloud code, thanks to [Florent Vilmart](https://github.com/flovilmart)
+* Add CLI option to pass `host` parameter when creating parse-server from CLI, thanks to [Kulshekhar Kabra](https://github.com/kulshekhar)
+
+#### Bug fixes
+* Ensure batch routes are only using posix paths, thanks to [Steven Shipton](https://github.com/steven-supersolid)
+* Ensure falsy options from CLI are properly taken into account, thanks to [Steven Shipton](https://github.com/steven-supersolid)
+* Fixes issues affecting calls to `matchesKeyInQuery` with pointers.
+* Ensure that `select` keys can be changed in triggers (beforeFind...), thanks to [Arthur Cinader](https://github.com/acinader)
+
+#### Housekeeping
+* Enables and enforces linting with eslint, thanks to [Arthur Cinader](https://github.com/acinader)
+
+### 2.2.25
+
+Postgres support requires v9.5
+
+#### New Features
+* Dockerizing Parse Server, thanks to [Kirill Kravinsky](https://github.com/woyorus)
+* Login with qq, wechat, weibo, thanks to [haifeizhang]()
+* Password policy, validation and expiration, thanks to [Bhaskar Reddy Yasa](https://github.com/bhaskaryasa)
+* Health check on /health, thanks to [Kirill Kravinsky](https://github.com/woyorus)
+* Reuse SchemaCache across requests option, thanks to [Steven Shipton](https://github.com/steven-supersolid)
+
+#### Improvements
+* Better support for CLI options, thanks to [Steven Shipton](https://github.com/steven-supersolid)
+* Specity a database timeout with maxTimeMS, thanks to [Tyler Brock](https://github.com/TylerBrock)
+* Adds the username to reset password success pages, thanks to [Halim Qarroum](https://github.com/HQarroum)
+* Better support for Redis cache adapter, thanks to [Tyler Brock](https://github.com/TylerBrock)
+* Better coverage of Postgres, thanks to [Kulshekhar Kabra](https://github.com/kulshekhar)
+
+#### Bug Fixes
+* Fixes issue when sending push to multiple installations, thanks to [Florent Vilmart](https://github.com/flovilmart)
+* Fixes issues with twitter authentication, thanks to [jonas-db](https://github.com/jonas-db)
+* Ignore createdAt fields update, thanks to [Yuki Takeichi](https://github.com/yuki-takeichi)
+* Improve support for array equality with LiveQuery, thanks to [David Poetzsch-Heffter](https://github.com/dpoetzsch)
+* Improve support for batch endpoint when serverURL and publicServerURL have different paths, thanks to [Florent Vilmart](https://github.com/flovilmart)
+* Support saving relation objects, thanks to [Yuki Takeichi](https://github.com/yuki-takeichi)
+
+### 2.2.24
+
+#### New Features
+* LiveQuery: Bring your own adapter (#2902), thanks to [Florent Vilmart](https://github.com/flovilmart)
+* LiveQuery: Adds "update" operator to update a query subscription (#2935), thanks to [Florent Vilmart](https://github.com/flovilmart)
+
+#### Improvements
+* Better Postgres support, thanks to [Kulshekhar Kabra](https://github.com/kulshekhar)
+* Logs the function name when failing (#2963), thanks to [Michael Helvey](https://github.com/michaelhelvey)
+* CLI: forces closing the connections with SIGINT/SIGTERM (#2964), thanks to [Kulshekhar Kabra](https://github.com/kulshekhar)
+* Reduce the number of calls to the _SCHEMA table (#2912), thanks to [Steven Shipton](https://github.com/steven-supersolid)
+* LiveQuery: Support for Role ACL's, thanks to [Aaron Blondeau](https://github.com/aaron-blondeau-dose)
+
+#### Bug Fixes
+* Better support for checking application and client keys, thanks to [Steven Shipton](https://github.com/steven-supersolid)
+* Google OAuth, better support for android and web logins, thanks to [Florent Vilmart](https://github.com/flovilmart)
+
+### 2.2.23
+
+* Run liveQuery server from CLI with a different port, thanks to [Florent Vilmart](https://github.com/flovilmart)
+* Support for Postgres databaseURI, thanks to [Kulshekhar Kabra](https://github.com/kulshekhar)
+* Support for Postgres options, thanks to [Kulshekhar Kabra](https://github.com/kulshekhar)
+* Improved support for google login (id_token and access_token), thanks to [Florent Vilmart](https://github.com/flovilmart)
+* Improvements with VKontakte login, thanks to [Eugene Antropov](https://github.com/antigp)
+* Improved support for `select` and `include`, thanks to [Florent Vilmart](https://github.com/flovilmart)
+
+#### Bug fixes
+
+* Fix error when updating installation with useMasterKey (#2888), thanks to [Jeremy Louie](https://github.com/JeremyPlease)
+* Fix bug affecting usage of multiple `notEqualTo`, thanks to [Jeremy Louie](https://github.com/JeremyPlease)
+* Improved support for null values in arrays, thanks to [Florent Vilmart](https://github.com/flovilmart)
+
+### 2.2.22
+
+* Minimum nodejs engine is now 4.5
+
+#### New Features
+* New: CLI for parse-live-query-server, thanks to [Florent Vilmart](https://github.com/flovilmart)
+* New: Start parse-live-query-server for parse-server CLI, thanks to [Florent Vilmart](https://github.com/flovilmart)
+
+#### Bug fixes
+* Fix: Include with pointers are not conflicting with get CLP anymore, thanks to [Florent Vilmart](https://github.com/flovilmart)
+* Fix: Removes dependency on babel-polyfill, thanks to [Florent Vilmart](https://github.com/flovilmart)
+* Fix: Support nested select calls, thanks to [Florent Vilmart](https://github.com/flovilmart)
+* Fix: Use native column selection instead of runtime, thanks to [Florent Vilmart](https://github.com/flovilmart)
+* Fix: installationId header is properly used when updating `_Installation` objects, thanks to [Florent Vilmart](https://github.com/flovilmart)
+* Fix: don't crash parse-server on improperly formatted live-query messages, thanks to [Florent Vilmart](https://github.com/flovilmart)
+* Fix: Passwords are properly stripped out of logs, thanks to [Arthur Cinader](https://github.com/acinader)
+* Fix: Lookup for email in username if email is not set, thanks to [Florent Vilmart](https://github.com/flovilmart)
+
 ### 2.2.21
 
 * Fix: Reverts removal of babel-polyfill

@@ -120,20 +120,15 @@ export function handleParseHeaders(req, res, next) {
 
   // Client keys are not required in parse-server, but if any have been configured in the server, validate them
   //  to preserve original behavior.
-  let keys = ["clientKey", "javascriptKey", "dotNetKey", "restAPIKey"];
+  const keys = ["clientKey", "javascriptKey", "dotNetKey", "restAPIKey"];
+  const oneKeyConfigured = keys.some(function(key) {
+    return req.config[key];
+  });
+  const oneKeyMatches = keys.some(function(key){
+    return req.config[key] && info[key] == req.config[key];
+  });
 
-  // We do it with mismatching keys to support no-keys config
-  var keyMismatch = keys.reduce(function(mismatch, key){
-
-    // check if set in the config and compare
-    if (req.config[key] && info[key] !== req.config[key]) {
-      mismatch++;
-    }
-    return mismatch;
-  }, 0);
-
-  // All keys mismatch
-  if (keyMismatch == keys.length) {
+  if (oneKeyConfigured && !oneKeyMatches) {
     return invalidRequest(req, res);
   }
 
@@ -147,21 +142,21 @@ export function handleParseHeaders(req, res, next) {
     return;
   }
 
-  return Promise.resolve().then(() => {
+  return Promise.resolve().then(() => {
     // handle the upgradeToRevocableSession path on it's own
-    if (info.sessionToken && 
-        req.url === '/upgradeToRevocableSession' && 
+    if (info.sessionToken &&
+        req.url === '/upgradeToRevocableSession' &&
         info.sessionToken.indexOf('r:') != 0) {
-        return auth.getAuthForLegacySessionToken({ config: req.config, installationId: info.installationId, sessionToken: info.sessionToken })
+      return auth.getAuthForLegacySessionToken({ config: req.config, installationId: info.installationId, sessionToken: info.sessionToken })
     } else {
-        return auth.getAuthForSessionToken({ config: req.config, installationId: info.installationId, sessionToken: info.sessionToken })
+      return auth.getAuthForSessionToken({ config: req.config, installationId: info.installationId, sessionToken: info.sessionToken })
     }
   }).then((auth) => {
-      if (auth) {
-        req.auth = auth;
-        next();
-      }
-    })
+    if (auth) {
+      req.auth = auth;
+      next();
+    }
+  })
     .catch((error) => {
       if(error instanceof Parse.Error) {
         next(error);
@@ -226,7 +221,7 @@ export function allowCrossDomain(req, res, next) {
   else {
     next();
   }
-};
+}
 
 export function allowMethodOverride(req, res, next) {
   if (req.method === 'POST' && req.body._method) {
@@ -235,7 +230,7 @@ export function allowMethodOverride(req, res, next) {
     delete req.body._method;
   }
   next();
-};
+}
 
 export function handleParseErrors(err, req, res, next) {
   // TODO: Add logging as those errors won't make it to the PromiseRouter
@@ -263,10 +258,10 @@ export function handleParseErrors(err, req, res, next) {
     log.error('Uncaught internal server error.', err, err.stack);
     res.status(500);
     res.json({code: Parse.Error.INTERNAL_SERVER_ERROR,
-              message: 'Internal server error.'});
+      message: 'Internal server error.'});
   }
   next(err);
-};
+}
 
 export function enforceMasterKeyAccess(req, res, next) {
   if (!req.auth.isMaster) {
@@ -279,7 +274,7 @@ export function enforceMasterKeyAccess(req, res, next) {
 
 export function promiseEnforceMasterKeyAccess(request) {
   if (!request.auth.isMaster) {
-    let error = new Error();
+    const error = new Error();
     error.status = 403;
     error.message = "unauthorized: master key is required";
     throw error;

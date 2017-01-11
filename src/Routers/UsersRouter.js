@@ -1,16 +1,15 @@
 // These methods handle the User-related routes.
 
 import deepcopy       from 'deepcopy';
+import Parse          from 'parse/node';
 import Config         from '../Config';
 import AccountLockout from '../AccountLockout';
 import ClassesRouter  from './ClassesRouter';
-import PromiseRouter  from '../PromiseRouter';
 import rest           from '../rest';
 import Auth           from '../Auth';
 import passwordCrypto from '../password';
 import RestWrite      from '../RestWrite';
-let cryptoUtils = require('../cryptoUtils');
-let triggers = require('../triggers');
+const cryptoUtils = require('../cryptoUtils');
 
 export class UsersRouter extends ClassesRouter {
   handleFind(req) {
@@ -24,7 +23,7 @@ export class UsersRouter extends ClassesRouter {
   }
 
   handleCreate(req) {
-    let data = deepcopy(req.body);
+    const data = deepcopy(req.body);
     req.body = data;
     req.params.className = '_User';
 
@@ -45,7 +44,7 @@ export class UsersRouter extends ClassesRouter {
     if (!req.info || !req.info.sessionToken) {
       throw new Parse.Error(Parse.Error.INVALID_SESSION_TOKEN, 'invalid session token');
     }
-    let sessionToken = req.info.sessionToken;
+    const sessionToken = req.info.sessionToken;
     return rest.find(req.config, Auth.master(req.config), '_Session',
       { sessionToken },
       { include: 'user' }, req.info.clientSDK)
@@ -55,7 +54,7 @@ export class UsersRouter extends ClassesRouter {
           !response.results[0].user) {
           throw new Parse.Error(Parse.Error.INVALID_SESSION_TOKEN, 'invalid session token');
         } else {
-          let user = response.results[0].user;
+          const user = response.results[0].user;
           // Send token back on the login, because SDKs expect that.
           user.sessionToken = sessionToken;
           return { response: user };
@@ -97,7 +96,7 @@ export class UsersRouter extends ClassesRouter {
       })
       .then((correct) => {
         isValidPassword = correct;
-        let accountLockoutPolicy = new AccountLockout(user, req.config);
+        const accountLockoutPolicy = new AccountLockout(user, req.config);
         return accountLockoutPolicy.handleLoginAttempt(isValidPassword);
       })
       .then(() => {
@@ -105,7 +104,29 @@ export class UsersRouter extends ClassesRouter {
           throw new Parse.Error(Parse.Error.OBJECT_NOT_FOUND, 'Invalid username/password.');
         }
 
-        let token = 'r:' + cryptoUtils.newToken();
+        // handle password expiry policy
+        if (req.config.passwordPolicy && req.config.passwordPolicy.maxPasswordAge) {
+          let changedAt = user._password_changed_at;
+
+          if (!changedAt) {
+            // password was created before expiry policy was enabled.
+            // simply update _User object so that it will start enforcing from now
+            changedAt = new Date();
+            req.config.database.update('_User', {username: user.username},
+              {_password_changed_at: Parse._encode(changedAt)});
+          } else {
+            // check whether the password has expired
+            if (changedAt.__type == 'Date') {
+              changedAt = new Date(changedAt.iso);
+            }
+            // Calculate the expiry time.
+            const expiresAt = new Date(changedAt.getTime() + 86400000 * req.config.passwordPolicy.maxPasswordAge);
+            if (expiresAt < new Date()) // fail of current time is past password expiry time
+              throw new Parse.Error(Parse.Error.OBJECT_NOT_FOUND, 'Your password has expired. Please reset your password.');
+          }
+        }
+
+        const token = 'r:' + cryptoUtils.newToken();
         user.sessionToken = token;
         delete user.password;
 
@@ -124,8 +145,8 @@ export class UsersRouter extends ClassesRouter {
 
         req.config.filesController.expandFilesInObject(req.config, user);
 
-        let expiresAt = req.config.generateSessionExpiresAt();
-        let sessionData = {
+        const expiresAt = req.config.generateSessionExpiresAt();
+        const sessionData = {
           sessionToken: token,
           user: {
             __type: 'Pointer',
@@ -144,7 +165,7 @@ export class UsersRouter extends ClassesRouter {
           sessionData.installationId = req.info.installationId
         }
 
-        let create = new RestWrite(req.config, Auth.master(req.config), '_Session', null, sessionData);
+        const create = new RestWrite(req.config, Auth.master(req.config), '_Session', null, sessionData);
         return create.execute();
       }).then(() => {
         return { response: user };
@@ -152,7 +173,7 @@ export class UsersRouter extends ClassesRouter {
   }
 
   handleLogOut(req) {
-    let success = {response: {}};
+    const success = {response: {}};
     if (req.info && req.info.sessionToken) {
       return rest.find(req.config, Auth.master(req.config), '_Session',
         { sessionToken: req.info.sessionToken }, undefined, req.info.clientSDK
@@ -186,18 +207,18 @@ export class UsersRouter extends ClassesRouter {
         throw e;
       }
     }
-    let { email } = req.body;
+    const { email } = req.body;
     if (!email) {
       throw new Parse.Error(Parse.Error.EMAIL_MISSING, "you must provide an email");
     }
     if (typeof email !== 'string') {
       throw new Parse.Error(Parse.Error.INVALID_EMAIL_ADDRESS, 'you must provide a valid email string');
     }
-    let userController = req.config.userController;
-    return userController.sendPasswordResetEmail(email).then(token => {
-       return Promise.resolve({
-         response: {}
-       });
+    const userController = req.config.userController;
+    return userController.sendPasswordResetEmail(email).then(() => {
+      return Promise.resolve({
+        response: {}
+      });
     }, err => {
       if (err.code === Parse.Error.OBJECT_NOT_FOUND) {
         throw new Parse.Error(Parse.Error.EMAIL_NOT_FOUND, `No user found with email ${email}.`);

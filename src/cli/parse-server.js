@@ -1,21 +1,15 @@
-import path from 'path';
+/* eslint-disable no-console */
 import express from 'express';
 import { ParseServer } from '../index';
-import definitions from './cli-definitions';
-import program from './utils/commander';
-import { mergeWithOptions } from './utils/commander';
+import definitions from './definitions/parse-server';
 import cluster from 'cluster';
 import os from 'os';
+import runner from './utils/runner';
 
-program.loadDefinitions(definitions);
-
-program
-  .usage('[options] <path/to/configuration.json>');
-
-program.on('--help', function(){
+const help = function(){
   console.log('  Get Started guide:');
   console.log('');
-  console.log('    Please have a look at the get started guide!')
+  console.log('    Please have a look at the get started guide!');
   console.log('    https://github.com/ParsePlatform/parse-server/wiki/Parse-Server-Guide');
   console.log('');
   console.log('');
@@ -32,43 +26,52 @@ program.on('--help', function(){
   console.log('    $ parse-server -- --appId APP_ID --masterKey MASTER_KEY --serverURL serverURL');
   console.log('    $ parse-server -- --appId APP_ID --masterKey MASTER_KEY --serverURL serverURL');
   console.log('');
-});
-
-program.parse(process.argv, process.env);
-
-let options = program.getOptions();
-
-if (!options.serverURL) {
-  options.serverURL = `http://localhost:${options.port}${options.mountPath}`;
-}
-
-if (!options.appId || !options.masterKey || !options.serverURL) {
-  program.outputHelp();
-  console.error("");
-  console.error('\u001b[31mERROR: appId and masterKey are required\u001b[0m');
-  console.error("");
-  process.exit(1);
-}
-
-function logStartupOptions(options) {
-  for (let key in options) {
-    let value = options[key];
-    if (key == "masterKey") {
-      value = "***REDACTED***";
-    }
-    console.log(`${key}: ${value}`);
-  }
-}
+};
 
 function startServer(options, callback) {
   const app = express();
   const api = new ParseServer(options);
+  const sockets = {};
+
   app.use(options.mountPath, api);
 
-  var server = app.listen(options.port, callback);
+  const server = app.listen(options.port, options.host, callback);
+  server.on('connection', initializeConnections);
 
-  var handleShutdown = function() {
+  if (options.startLiveQueryServer || options.liveQueryServerOptions) {
+    let liveQueryServer = server;
+    if (options.liveQueryPort) {
+      liveQueryServer = express().listen(options.liveQueryPort, () => {
+        console.log('ParseLiveQuery listening on ' + options.liveQueryPort);
+      });
+    }
+    ParseServer.createLiveQueryServer(liveQueryServer, options.liveQueryServerOptions);
+  }
+
+  function initializeConnections(socket) {
+    /* Currently, express doesn't shut down immediately after receiving SIGINT/SIGTERM if it has client connections that haven't timed out. (This is a known issue with node - https://github.com/nodejs/node/issues/2642)
+
+      This function, along with `destroyAliveConnections()`, intend to fix this behavior such that parse server will close all open connections and initiate the shutdown process as soon as it receives a SIGINT/SIGTERM signal. */
+
+    const socketId = socket.remoteAddress + ':' + socket.remotePort;
+    sockets[socketId] = socket;
+
+    socket.on('close', () => {
+      delete sockets[socketId];
+    });
+  }
+
+  function destroyAliveConnections() {
+    for (const socketId in sockets) {
+      try {
+        sockets[socketId].destroy();
+      } catch (e) { /* */ }
+    }
+  }
+
+  const handleShutdown = function() {
     console.log('Termination signal received. Shutting down.');
+    destroyAliveConnections();
     server.close(function () {
       process.exit(0);
     });
@@ -77,27 +80,59 @@ function startServer(options, callback) {
   process.on('SIGINT', handleShutdown);
 }
 
-if (options.cluster) {
-  const numCPUs = typeof options.cluster === 'number' ? options.cluster : os.cpus().length;
-  if (cluster.isMaster) {
-    logStartupOptions(options);
-    for(var i = 0; i < numCPUs; i++) {
-      cluster.fork();
-    }
-    cluster.on('exit', (worker, code, signal) => {
-      console.log(`worker ${worker.process.pid} died... Restarting`);
-      cluster.fork();
-    });
-  } else {
-    startServer(options, () => {
-      console.log('['+process.pid+'] parse-server running on '+options.serverURL);
-    });
-  }
-} else {
-  startServer(options, () => {
-    logStartupOptions(options);
-    console.log('');
-    console.log('['+process.pid+'] parse-server running on '+options.serverURL);
-  });
-}
 
+runner({
+  definitions,
+  help,
+  usage: '[options] <path/to/configuration.json>',
+  start: function(program, options, logOptions) {
+    if (!options.serverURL) {
+      options.serverURL = `http://localhost:${options.port}${options.mountPath}`;
+    }
+
+    if (!options.appId || !options.masterKey || !options.serverURL) {
+      program.outputHelp();
+      console.error("");
+      console.error('\u001b[31mERROR: appId and masterKey are required\u001b[0m');
+      console.error("");
+      process.exit(1);
+    }
+
+    if (options["liveQuery.classNames"]) {
+      options.liveQuery = options.liveQuery || {};
+      options.liveQuery.classNames = options["liveQuery.classNames"];
+      delete options["liveQuery.classNames"];
+    }
+    if (options["liveQuery.redisURL"]) {
+      options.liveQuery = options.liveQuery || {};
+      options.liveQuery.redisURL = options["liveQuery.redisURL"];
+      delete options["liveQuery.redisURL"];
+    }
+
+    if (options.cluster) {
+      const numCPUs = typeof options.cluster === 'number' ? options.cluster : os.cpus().length;
+      if (cluster.isMaster) {
+        logOptions();
+        for(let i = 0; i < numCPUs; i++) {
+          cluster.fork();
+        }
+        cluster.on('exit', (worker, code) => {
+          console.log(`worker ${worker.process.pid} died (${code})... Restarting`);
+          cluster.fork();
+        });
+      } else {
+        startServer(options, () => {
+          console.log('['+process.pid+'] parse-server running on '+options.serverURL);
+        });
+      }
+    } else {
+      startServer(options, () => {
+        logOptions();
+        console.log('');
+        console.log('['+process.pid+'] parse-server running on '+options.serverURL);
+      });
+    }
+  }
+});
+
+/* eslint-enable no-console */

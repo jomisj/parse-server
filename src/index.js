@@ -4,19 +4,19 @@ import FileSystemAdapter    from 'parse-server-fs-adapter'
 import InMemoryCacheAdapter from './Adapters/Cache/InMemoryCacheAdapter'
 import NullCacheAdapter     from './Adapters/Cache/NullCacheAdapter'
 import RedisCacheAdapter    from './Adapters/Cache/RedisCacheAdapter'
-import TestUtils            from './TestUtils';
+import * as TestUtils       from './TestUtils';
 import { useExternal }      from './deprecated';
 import { getLogger }        from './logger';
 
 // Factory function
-let _ParseServer = function(options) {
-  let server = new ParseServer(options);
+const _ParseServer = function(options) {
+  const server = new ParseServer(options);
   return server.app;
 }
 // Mount the create liveQueryServer
 _ParseServer.createLiveQueryServer = ParseServer.createLiveQueryServer;
 
-let GCSAdapter = useExternal('GCSAdapter', 'parse-server-gcs-adapter');
+const GCSAdapter = useExternal('GCSAdapter', 'parse-server-gcs-adapter');
 
 Object.defineProperty(module.exports, 'logger', {
   get: getLogger

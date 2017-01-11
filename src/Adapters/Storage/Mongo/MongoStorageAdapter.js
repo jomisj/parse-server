@@ -11,10 +11,12 @@ import {
   transformWhere,
   transformUpdate,
 } from './MongoTransform';
+import Parse                 from 'parse/node';
 import _                     from 'lodash';
+import defaults              from '../../../defaults';
 
-let mongodb = require('mongodb');
-let MongoClient = mongodb.MongoClient;
+const mongodb = require('mongodb');
+const MongoClient = mongodb.MongoClient;
 
 const MongoSchemaCollectionName = '_SCHEMA';
 
@@ -51,19 +53,19 @@ const convertParseSchemaToMongoSchema = ({...schema}) => {
 // Returns { code, error } if invalid, or { result }, an object
 // suitable for inserting into _SCHEMA collection, otherwise.
 const mongoSchemaFromFieldsAndClassNameAndCLP = (fields, className, classLevelPermissions) => {
-  let mongoObject = {
+  const mongoObject = {
     _id: className,
     objectId: 'string',
     updatedAt: 'string',
     createdAt: 'string'
   };
 
-  for (let fieldName in fields) {
+  for (const fieldName in fields) {
     mongoObject[fieldName] = MongoSchemaCollection.parseFieldTypeToMongoFieldType(fields[fieldName]);
   }
 
   if (typeof classLevelPermissions !== 'undefined') {
-    mongoObject._metadata = mongoObject._metadata || {};
+    mongoObject._metadata = mongoObject._metadata || {};
     if (!classLevelPermissions) {
       delete mongoObject._metadata.class_permissions;
     } else {
@@ -92,6 +94,9 @@ export class MongoStorageAdapter {
     this._uri = uri;
     this._collectionPrefix = collectionPrefix;
     this._mongoOptions = mongoOptions;
+
+    // MaxTimeMS is not a global MongoDB client option, it is applied per operation.
+    this._maxTimeMS = mongoOptions.maxTimeMS;
   }
 
   connect() {
@@ -108,14 +113,14 @@ export class MongoStorageAdapter {
         delete this.connectionPromise;
         return;
       }
-      database.on('error', (error) => {
+      database.on('error', () => {
         delete this.connectionPromise;
       });
-      database.on('close', (error) => {
+      database.on('close', () => {
         delete this.connectionPromise;
       });
       this.database = database;
-    }).catch((err) => {
+    }).catch((err) => {
       delete this.connectionPromise;
       return Promise.reject(err);
     });
@@ -152,7 +157,7 @@ export class MongoStorageAdapter {
 
   createClass(className, schema) {
     schema = convertParseSchemaToMongoSchema(schema);
-    let mongoObject = mongoSchemaFromFieldsAndClassNameAndCLP(schema.fields, className, schema.classLevelPermissions);
+    const mongoObject = mongoSchemaFromFieldsAndClassNameAndCLP(schema.fields, className, schema.classLevelPermissions);
     mongoObject._id = className;
     return this._schemaCollection()
     .then(schemaCollection => schemaCollection._collection.insertOne(mongoObject))
@@ -277,7 +282,7 @@ export class MongoStorageAdapter {
     schema = convertParseSchemaToMongoSchema(schema);
     return this._adaptiveCollection(className)
     .then(collection => {
-      let mongoWhere = transformWhere(className, query, schema);
+      const mongoWhere = transformWhere(className, query, schema);
       return collection.deleteMany(mongoWhere)
     })
     .then(({ result }) => {
@@ -285,7 +290,7 @@ export class MongoStorageAdapter {
         throw new Parse.Error(Parse.Error.OBJECT_NOT_FOUND, 'Object not found.');
       }
       return Promise.resolve();
-    }, error => {
+    }, () => {
       throw new Parse.Error(Parse.Error.INTERNAL_SERVER_ERROR, 'Database adapter error');
     });
   }
@@ -307,7 +312,7 @@ export class MongoStorageAdapter {
     const mongoWhere = transformWhere(className, query, schema);
     return this._adaptiveCollection(className)
     .then(collection => collection._mongoCollection.findAndModify(mongoWhere, [], mongoUpdate, { new: true }))
-    .then(result => result.value);
+    .then(result => mongoObjectToParseObject(className, result.value, schema));
   }
 
   // Hopefully we can get rid of this. It's only used for config and hooks.
@@ -320,12 +325,22 @@ export class MongoStorageAdapter {
   }
 
   // Executes a find. Accepts: className, query in Parse format, and { skip, limit, sort }.
-  find(className, schema, query, { skip, limit, sort }) {
+  find(className, schema, query, { skip, limit, sort, keys }) {
     schema = convertParseSchemaToMongoSchema(schema);
-    let mongoWhere = transformWhere(className, query, schema);
-    let mongoSort = _.mapKeys(sort, (value, fieldName) => transformKey(className, fieldName, schema));
+    const mongoWhere = transformWhere(className, query, schema);
+    const mongoSort = _.mapKeys(sort, (value, fieldName) => transformKey(className, fieldName, schema));
+    const mongoKeys = _.reduce(keys, (memo, key) => {
+      memo[transformKey(className, key, schema)] = 1;
+      return memo;
+    }, {});
     return this._adaptiveCollection(className)
-    .then(collection => collection.find(mongoWhere, { skip, limit, sort: mongoSort }))
+    .then(collection => collection.find(mongoWhere, {
+      skip,
+      limit,
+      sort: mongoSort,
+      keys: mongoKeys,
+      maxTimeMS: this._maxTimeMS,
+    }))
     .then(objects => objects.map(object => mongoObjectToParseObject(className, object, schema)))
   }
 
@@ -336,8 +351,8 @@ export class MongoStorageAdapter {
   // which is why we use sparse indexes.
   ensureUniqueness(className, schema, fieldNames) {
     schema = convertParseSchemaToMongoSchema(schema);
-    let indexCreationRequest = {};
-    let mongoFieldNames = fieldNames.map(fieldName => transformKey(className, fieldName, schema));
+    const indexCreationRequest = {};
+    const mongoFieldNames = fieldNames.map(fieldName => transformKey(className, fieldName, schema));
     mongoFieldNames.forEach(fieldName => {
       indexCreationRequest[fieldName] = 1;
     });
@@ -354,14 +369,18 @@ export class MongoStorageAdapter {
 
   // Used in tests
   _rawFind(className, query) {
-    return this._adaptiveCollection(className).then(collection => collection.find(query));
+    return this._adaptiveCollection(className).then(collection => collection.find(query, {
+      maxTimeMS: this._maxTimeMS,
+    }));
   }
 
-  // Executs a count.
+  // Executes a count.
   count(className, schema, query) {
     schema = convertParseSchemaToMongoSchema(schema);
     return this._adaptiveCollection(className)
-    .then(collection => collection.count(transformWhere(className, query, schema)));
+    .then(collection => collection.count(transformWhere(className, query, schema), {
+      maxTimeMS: this._maxTimeMS,
+    }));
   }
 
   performInitialization() {
